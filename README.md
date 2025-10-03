@@ -1,4 +1,4 @@
-# 🎥 YouTube RAG Chatbot
+# 🎥 YouTube Chatbot
 
 This project is an **AI-powered chatbot** that allows you to interact with **YouTube videos, playlists, or multiple video links** by asking natural language questions.  
 It uses **LangChain, FAISS, and OpenAI GPT models** to retrieve transcript segments and generate fluent, contextual answers with **timestamped citations** that link directly to YouTube.
