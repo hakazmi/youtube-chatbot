@@ -92,25 +92,6 @@ It uses **LangChain, FAISS, and OpenAI GPT models** to retrieve transcript segme
 ### 4. Stopping services
 - docker-compose down
 
-## 📂 Project Structure
-
-youtube_chatbot/
-│── main.py                 # FastAPI backend entry
-│── rag_pipeline.py         # RAG pipeline with LangChain + OpenAI
-│── requirements.txt        # Python dependencies
-│── docker-compose.yml      # Docker services config
-│── backend.Dockerfile      # Backend Dockerfile
-│── project/                # Frontend React app
-│   │── src/
-│   │   ├── App.tsx
-│   │   ├── components/
-│   │   └── ...
-│   │── package.json
-│   │── frontend.Dockerfile
-│── .env                    # API keys (not committed to Git)
-│── .gitignore              # Ignore venv, node_modules, etc.
-
-
 ## ✨ Features
 - Index single/multiple YouTube videos or playlists
 - Ask questions and get AI-generated answers
