@@ -1,0 +1,31 @@
+version: "3.9"
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend.Dockerfile
+    container_name: youtube_chatbot_backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+      - ./youtube:/app/youtube
+    env_file:
+      - .env
+    restart: always
+
+  frontend:
+    build:
+      context: ./project        # 👈 frontend lives in project folder
+      dockerfile: frontend.Dockerfile
+    container_name: youtube_chatbot_frontend
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./project:/app          # 👈 mount ONLY project folder, not whole root
+      - /app/node_modules       # 👈 keep container’s node_modules separate
+    depends_on:
+      - backend
+    restart: always
+

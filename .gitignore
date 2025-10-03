@@ -1,0 +1,55 @@
+# --- Python / Backend ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.db
+*.sqlite3
+*.log
+
+# Virtual environments
+venv/
+ENV/
+env/
+youtubee/         # your virtual environment folder
+*.egg-info/
+.eggs/
+
+# --- Node / Frontend ---
+project/node_modules/
+project/dist/
+project/.vite/
+project/.next/
+project/out/
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+pnpm-debug.log
+
+# --- Environment files ---
+.env
+.env.local
+.env.*.local
+
+# --- Docker ---
+*.pid
+*.seed
+*.tar
+*.log
+*.sock
+.docker/
+.dockerignore
+docker-compose.override.yml
+
+# --- IDE / Editors ---
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# --- System files ---
+*.bak
+*.tmp
+*.cache
