@@ -1,9 +1,11 @@
 import re
 
+
 def clean_transcript(text: str) -> str:
-    """Remove timestamps, newlines, and extra spaces from transcript."""
+    """Normalize whitespace; keep punctuation; strip leading/trailing spaces."""
     text = re.sub(r"\s+", " ", text)
     return text.strip()
+
 
 def format_citations(docs):
     """Format retrieved docs into citations with timestamps."""

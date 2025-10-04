@@ -53,3 +53,7 @@ Thumbs.db
 *.bak
 *.tmp
 *.cache
+
+# Local FAISS index
+vector_store/
+

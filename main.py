@@ -5,6 +5,7 @@ from ingest import index_videos
 from rag_pipeline import build_rag_pipeline, answer_question
 import shutil
 import os
+from typing import Optional
 
 app = FastAPI(title="YouTube RAG Chatbot", version="1.0.0")
 
@@ -24,6 +25,7 @@ VECTOR_STORE_PATH = "vector_store"
 
 class QuestionRequest(BaseModel):
     question: str
+    mode: Optional[str] = None  # 'concise' | 'detailed' (optional)
 
 
 class MultiIndexRequest(BaseModel):
@@ -67,22 +69,25 @@ def index_videos_endpoint(req: MultiIndexRequest):
 
 @app.post("/ask_question")
 def ask_question(req: QuestionRequest):
-    """Ask a question about the indexed videos/playlists"""
     global qa_pipeline
     if qa_pipeline is None:
         return {"error": "No video indexed yet. Call /index_videos first."}
-
     try:
-        qa, retriever = qa_pipeline
-        answer, metadata = answer_question(
-            req.question, qa, retriever, return_metadata=True
-        )
+        stuff_chain, retriever = qa_pipeline
 
+        # Map mode to retriever K (tune these)
+        mode = (req.mode or "concise").lower()
+        k = 5 if mode == "concise" else 8
+
+        answer, metadata = answer_question(
+            req.question, stuff_chain, retriever, return_metadata=True, k=k
+        )
         return {
             "question": req.question,
             "answer": answer,
             "citations": metadata.get("citations", []),
             "source_videos": metadata.get("source_videos", []),
+            "timings": metadata.get("timings", {}),
         }
     except Exception as e:
         return {"error": f"Failed to generate answer: {str(e)}"}
@@ -90,4 +95,5 @@ def ask_question(req: QuestionRequest):
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
