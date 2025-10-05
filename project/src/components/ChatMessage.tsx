@@ -17,44 +17,73 @@ import type { Message, Citation } from './types';
 // Linkify bracketed refs like "[#1 V2 01:59–02:04]" using the matching citation URL.
 function linkifyRefBrackets(text: string, citations: Citation[]): React.ReactNode[] {
   const refMap = new Map(citations.map((c) => [c.ref_id, c]));
-  const re = /\[(#\d+)\s+V\d+\s+\d{1,2}:\d{2}–\d{1,2}:\d{2}\]/g;
 
-  const out: React.ReactNode[] = [];
+  // We'll process in two passes:
+  // 1) Full refs "[#1 V2 01:59–02:04]" (keep as one link)
+  // 2) Short refs "[#1]" (inside Evidence lines, etc.)
+  const reFull = /\[(#\d+)\s+V\d+\s+\d{1,2}:\d{2}–\d{1,2}:\d{2}\]/g;
+  const reShort = /\[(#\d+)\]/g;
+
+  const nodes: React.ReactNode[] = [];
   let last = 0;
   let m: RegExpExecArray | null;
 
-  while ((m = re.exec(text)) !== null) {
-    const start = m.index;
-    const end = re.lastIndex;
-    const full = m[0];
-    const refId = m[1];
-
-    if (start > last) out.push(text.slice(last, start));
-
+  // helper to push a link node
+  const pushLink = (key: string, refId: string, label: string) => {
     const cite = refMap.get(refId);
-    if (cite?.url) {
-      out.push(
-        <a
-          key={`${refId}-${start}`}
-          href={cite.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="no-underline hover:underline font-semibold inline-flex items-center gap-1 text-zinc-900 hover:text-red-600 transition"
-          title={`Play ${cite.video_tag} at ${cite.timestamp}`}
-          aria-label={`Play ${cite.video_tag} at ${cite.timestamp}`}
-        >
-          <Play className="w-3 h-3 text-red-600" />
-          {full}
-        </a>
-      );
-    } else {
-      out.push(full);
-    }
+    if (!cite?.url) return nodes.push(label);
+    nodes.push(
+      <a
+        key={key}
+        href={cite.url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="no-underline hover:underline font-semibold inline-flex items-center gap-1 text-zinc-900 hover:text-red-600 transition"
+        title={`Play ${cite.video_tag} at ${cite.timestamp}`}
+        aria-label={`Play ${cite.video_tag} at ${cite.timestamp}`}
+      >
+        <Play className="w-3 h-3 text-red-600" />
+        {label}
+      </a>
+    );
+  };
+
+  // First pass: full refs
+  while ((m = reFull.exec(text)) !== null) {
+    const start = m.index;
+    const end = reFull.lastIndex;
+    const segment = text.slice(last, start);
+    if (segment) nodes.push(segment);
+
+    const full = m[0];
+    const refId = m[1]; // "#1"
+    pushLink(`${refId}-${start}-full`, refId, full);
     last = end;
   }
-  if (last < text.length) out.push(text.slice(last));
-  return out;
+  if (last < text.length) nodes.push(text.slice(last));
+
+  // Second pass: within plain text chunks, link short refs "[#N]"
+  const expanded: React.ReactNode[] = [];
+  nodes.forEach((node, idx) => {
+    if (typeof node !== 'string') return expanded.push(node);
+    let s = node;
+    let pos = 0;
+    let match: RegExpExecArray | null;
+    while ((match = reShort.exec(s)) !== null) {
+      const start = match.index;
+      const end = reShort.lastIndex;
+      if (start > pos) expanded.push(s.slice(pos, start));
+      const label = match[0];
+      const refId = match[1];
+      pushLink(`short-${refId}-${idx}-${start}`, refId, label);
+      pos = end;
+    }
+    if (pos < s.length) expanded.push(s.slice(pos));
+  });
+
+  return expanded;
 }
+
 
 // Extract a YouTube ID for thumbnails
 function extractVideoIdFromUrl(url?: string): string | null {
@@ -226,8 +255,8 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
         {/* Bubble */}
         <div
           className={`relative rounded-2xl px-4 py-3 ${isUser
-              ? 'bg-red-700 text-white'
-              : 'bg-zinc-100 text-zinc-900 border border-zinc-200'
+            ? 'bg-red-700 text-white'
+            : 'bg-zinc-100 text-zinc-900 border border-zinc-200'
             }`}
           style={{ whiteSpace: 'pre-wrap' }}
           aria-live={!isUser ? 'polite' : undefined}

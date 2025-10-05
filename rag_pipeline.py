@@ -73,20 +73,33 @@ def _build_used_order(
 
 
 # -------- prompt --------
+
 BASE_PROMPT = ChatPromptTemplate.from_template(
     """
 You are an AI assistant that answers questions about YouTube content.
 
-Rules for writing:
-- Use ONLY the provided transcript segments as source of truth.
-- Do NOT include links; the UI renders citations separately.
-- Each segment in the context is prefixed with a bracket like: "[#N VX MM:SS–MM:SS]".
-  • #N is a unique reference id, and VX is the video tag (V1, V2, ...).
-  • Start every micro-heading by copying that entire bracket EXACTLY.
-  • Use those exact timestamps; do not invent or reformat them.
-- Use timestamped micro-headings: "[#N VX MM:SS–MM:SS] • Short label", then 1–2 lines of explanation.
-- If something is missing/uncertain, state that and point to the nearest bracket.
-- Keep under ~200 words unless the user asked for more detail.
+You will receive transcript segments prefixed like: "[#N VX MM:SS–MM:SS] text…"
+- #N is a unique reference id.
+- VX is the video tag (V1, V2, …).
+- MM:SS–MM:SS is the exact time range.
+
+Write the answer using ONLY this context. Never add links in the text.
+
+If the context includes segments from MULTIPLE videos (i.e., more than one VX tag appears):
+  1) Produce 3–6 numbered points.
+  2) Each point should be a synthesis across videos (merge overlaps, highlight differences).
+  3) Keep each point to 1–3 sentences.
+  4) End that point with a new line starting with:
+     Evidence: [#N VX MM:SS–MM:SS], [#M VY MM:SS–MM:SS], …
+     (Only include the #refs you actually used. Keep the exact bracket format.)
+Else (mostly a single video):
+  - Use timestamped micro-headings: "[#N VX MM:SS–MM:SS] • Short label"
+  - Beneath each heading, write 1–2 sentences tied to that specific segment.
+
+General rules:
+- Use the exact timestamps and #refs you see; do not invent/reformat.
+- If something is uncertain or missing, say so and point to the nearest #ref.
+- Be concise (≈200–250 words total) unless the question demands more.
 
 Question:
 {question}
@@ -99,10 +112,19 @@ Write the final answer now.
 )
 
 
-def build_rag_pipeline(vector_store, k: int = 5):
+def build_rag_pipeline(vector_store, k: int = 10):
     """Returns (stuff_chain, retriever). Retrieval happens in answer_question()."""
-    retriever = vector_store.as_retriever(search_kwargs={"k": k})
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    # Diversify results for better cross-video coverage
+    try:
+        retriever = vector_store.as_retriever(
+            search_type="mmr",
+            search_kwargs={"k": k, "fetch_k": max(20, k * 4), "lambda_mult": 0.5},
+        )
+    except Exception:
+        # Fallback if MMR not available for this vectorstore build
+        retriever = vector_store.as_retriever(search_kwargs={"k": k})
+
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.4)
     stuff_chain = create_stuff_documents_chain(llm=llm, prompt=BASE_PROMPT)
     return stuff_chain, retriever
 
