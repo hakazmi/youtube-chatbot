@@ -1,6 +1,12 @@
-import { useState } from 'react';
-import { Youtube, Plus, Loader2, PlusCircle, MessageSquarePlus, Video, X } from 'lucide-react';
-import { extractVideoId, getVideoThumbnail } from '../utils/youtube';
+import React, { useMemo, useRef, useState } from 'react';
+import {
+  Youtube,
+  Plus,
+  RefreshCcw,
+  Loader2,
+  AlertCircle,
+  X,
+} from 'lucide-react';
 
 interface SidebarProps {
   onVideosIndexed: (urls: string[]) => void;
@@ -10,185 +16,261 @@ interface SidebarProps {
 
 const API_BASE_URL = 'http://localhost:8000';
 
-export default function Sidebar({ onVideosIndexed, indexedVideos, onNewChat }: SidebarProps) {
-  const [currentUrl, setCurrentUrl] = useState('');
-  const [urlList, setUrlList] = useState<string[]>([]);
+function parseUrls(input: string): string[] {
+  return input
+    .split(/[\n,\s,]+/) // split on newline, spaces, commas
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function isYouTubeUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return u.hostname.includes('youtube.com') || u.hostname.includes('youtu.be');
+  } catch {
+    return false;
+  }
+}
+
+function getYouTubeId(url: string): string | null {
+  try {
+    const u = new URL(url);
+    if (u.hostname.includes('youtu.be')) {
+      const id = u.pathname.replace('/', '');
+      return id || null;
+    }
+    if (u.hostname.includes('youtube.com')) {
+      const v = u.searchParams.get('v');
+      if (v) return v;
+      if (u.pathname.startsWith('/embed/')) return u.pathname.split('/')[2] || null;
+      if (u.pathname.startsWith('/shorts/')) return u.pathname.split('/')[2] || null;
+    }
+  } catch { }
+  return null;
+}
+
+function thumbnailFor(url: string): string | null {
+  const id = getYouTubeId(url);
+  return id ? `https://i.ytimg.com/vi/${id}/mqdefault.jpg` : null;
+}
+
+export default function Sidebar({
+  onVideosIndexed,
+  indexedVideos,
+  onNewChat,
+}: SidebarProps) {
+  const [input, setInput] = useState('');
+  const [pending, setPending] = useState<string[]>([]); // links staged by Enter
   const [isIndexing, setIsIndexing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
 
-  const handleAddUrl = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      if (currentUrl.trim().length > 0) {
-        setUrlList([...urlList, currentUrl.trim()]);
-        setCurrentUrl('');
-      }
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Already indexed (deduped for display)
+  const videos = useMemo(
+    () => Array.from(new Set(indexedVideos)),
+    [indexedVideos]
+  );
+
+  const addToPending = (raw: string) => {
+    const urls = parseUrls(raw);
+    if (urls.length === 0) return;
+
+    const invalid = urls.filter((u) => !isYouTubeUrl(u));
+    if (invalid.length) {
+      setError(`These didn’t look like YouTube links: ${invalid.slice(0, 3).join(', ')}`);
+    } else {
+      setError(null);
     }
+
+    const current = new Set(pending);
+    const alreadyIndexed = new Set(videos);
+
+    urls.forEach((u) => {
+      if (!isYouTubeUrl(u)) return; // skip invalid
+      if (!current.has(u) && !alreadyIndexed.has(u)) current.add(u);
+    });
+
+    setPending(Array.from(current));
+    setInput('');
+    // keep focus for fast entry
+    setTimeout(() => inputRef.current?.focus(), 0);
   };
 
-  const handleRemoveUrl = (index: number) => {
-    setUrlList(urlList.filter((_, i) => i !== index));
+  const removePending = (url: string) => {
+    setPending((prev) => prev.filter((u) => u !== url));
   };
 
-  const handleIndexVideos = async () => {
-    setError(null);
-    setSuccess(null);
+  const clearPending = () => {
+    setPending([]);
+  };
 
-    if (urlList.length === 0) {
-      setError('Please enter at least one YouTube URL');
+  const startIndexing = async () => {
+    if (pending.length === 0) {
+      setError('Add one or more links above (press Enter) before indexing.');
       return;
     }
-
+    setError(null);
     setIsIndexing(true);
-
     try {
-      const response = await fetch(`${API_BASE_URL}/index_videos`, {
+      const res = await fetch(`${API_BASE_URL}/index_videos`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          urls: urlList,
-        }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ urls: pending }),
       });
-
-      const data = await response.json();
-
+      const data = await res.json();
       if (data.status === 'ok') {
-        const indexedCount = data.indexed_urls?.length || urlList.length;
-        setSuccess(`Successfully indexed ${indexedCount} video(s)!`);
-        onVideosIndexed(data.indexed_urls || urlList);
-        setUrlList([]); // clear after indexing
-        setTimeout(() => setSuccess(null), 3000);
+        onVideosIndexed(data.indexed_urls || []);
+        clearPending();
       } else {
-        setError(data.detail || 'Failed to index videos');
+        setError(data.detail || 'Failed to index. Please try again.');
       }
-    } catch (err) {
-      setError('Failed to connect to the server.');
+    } catch {
+      setError('Network error while indexing. Is the backend running?');
     } finally {
       setIsIndexing(false);
+      setTimeout(() => inputRef.current?.focus(), 0);
+    }
+  };
+
+  const handleInputKeyDown: React.KeyboardEventHandler<HTMLInputElement> = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (input.trim().length > 0 && !isIndexing) addToPending(input);
     }
   };
 
   return (
-    <div className="w-80 bg-gray-50 border-r border-gray-200 flex flex-col">
-      <div className="p-4 border-b border-gray-200 bg-white">
-        <div className="flex items-center space-x-3 mb-4">
-          <div className="w-10 h-10 bg-red-600 rounded-lg flex items-center justify-center">
-            <Youtube className="w-6 h-6 text-white" />
+    <aside className="w-72 shrink-0 border-r border-zinc-200 bg-white h-screen sticky top-0 overflow-y-auto">
+      {/* Brand / actions */}
+      <div className="px-4 py-3 border-b border-zinc-200 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <div className="w-7 h-7 rounded-md bg-red-600 flex items-center justify-center">
+            <Youtube className="w-4 h-4 text-white" />
           </div>
-          <div>
-            <h1 className="text-lg font-bold text-gray-900">YouTube Chatbot</h1>
-            <p className="text-xs text-gray-500">Chat with videos</p>
-          </div>
+          <div className="text-sm font-semibold text-zinc-900">YouTube Chatbot</div>
         </div>
         <button
           onClick={onNewChat}
-          className="w-full flex items-center justify-center space-x-2 px-4 py-2.5 bg-white border-2 border-gray-300 hover:bg-gray-50 text-gray-700 rounded-lg transition-all font-medium text-sm"
+          className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-zinc-300 bg-white hover:bg-zinc-50 focus:outline-none focus:ring-2 focus:ring-red-300"
+          title="Start a brand new chat (clears index)"
         >
-          <MessageSquarePlus className="w-4 h-4" />
-          <span>New Chat</span>
+          <RefreshCcw className="w-3.5 h-3.5" />
+          New Chat
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        <div>
-          <h2 className="text-sm font-semibold text-gray-900 mb-3 flex items-center">
-            <PlusCircle className="w-4 h-4 mr-2 text-red-600" />
-            Add YouTube Videos
-          </h2>
+      {/* Add videos */}
+      <div className="p-4 space-y-2">
+        <div className="text-xs font-medium text-zinc-700">Add YouTube Videos</div>
+        <input
+          ref={inputRef}
+          type="text"
+          placeholder="Paste a video/playlist URL and press Enter to stage it"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={handleInputKeyDown}
+          className="w-full px-3 py-2 text-sm rounded-md border border-zinc-300 focus:outline-none focus:ring-2 focus:ring-red-300"
+        />
 
-          {/* Input box for one link at a time */}
-          <input
-            type="text"
-            value={currentUrl}
-            onChange={(e) => setCurrentUrl(e.target.value)}
-            onKeyDown={handleAddUrl}
-            placeholder="Paste a YouTube video/playlist URL and press Enter"
-            disabled={isIndexing}
-            className="w-full px-3 py-2 text-sm bg-white border border-gray-300 rounded-lg text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
-          />
-
-          {/* Show entered URLs */}
-          {urlList.length > 0 && (
-            <div className="mt-3 space-y-2">
-              {urlList.map((url, idx) => (
-                <div
-                  key={idx}
-                  className="flex items-center justify-between bg-white border border-gray-200 rounded px-2 py-1"
+        {/* Pending chips */}
+        {pending.length > 0 && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="text-[11px] uppercase text-zinc-500">
+                Pending to add ({pending.length})
+              </div>
+              <button
+                type="button"
+                onClick={clearPending}
+                className="text-[11px] underline text-zinc-600 hover:text-zinc-900"
+              >
+                Clear
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {pending.map((u) => (
+                <span
+                  key={u}
+                  className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full bg-zinc-100 border border-zinc-300 text-zinc-700"
+                  title={u}
                 >
-                  <p className="text-xs text-gray-600 truncate">{url}</p>
-                  <button onClick={() => handleRemoveUrl(idx)} className="text-red-500 hover:text-red-700">
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-
-          <button
-            onClick={handleIndexVideos}
-            disabled={isIndexing || urlList.length === 0}
-            className="w-full mt-3 flex items-center justify-center space-x-2 px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed font-medium text-sm"
-          >
-            {isIndexing ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Analyzing...</span>
-              </>
-            ) : (
-              <>
-                <Plus className="w-4 h-4" />
-                <span>Add to Chat</span>
-              </>
-            )}
-          </button>
-
-          {error && (
-            <div className="mt-3 bg-red-50 border border-red-200 rounded-lg p-3">
-              <p className="text-red-700 text-xs">{error}</p>
-            </div>
-          )}
-
-          {success && (
-            <div className="mt-3 bg-green-50 border border-green-200 rounded-lg p-3">
-              <p className="text-green-700 text-xs">{success}</p>
-            </div>
-          )}
-        </div>
-
-        {indexedVideos.length > 0 && (
-          <div className="pt-4 border-t border-gray-200">
-            <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center">
-              <Video className="w-4 h-4 mr-2 text-red-600" />
-              Your Videos ({indexedVideos.length})
-            </h3>
-            <div className="space-y-2">
-              {indexedVideos.map((url, idx) => {
-                const videoId = extractVideoId(url);
-                return (
-                  <div
-                    key={idx}
-                    className="bg-white border border-gray-200 rounded-lg p-2 hover:border-red-300 transition-colors"
+                  <span className="truncate max-w-[160px]">{u}</span>
+                  <button
+                    type="button"
+                    onClick={() => removePending(u)}
+                    className="ml-1 p-0.5 rounded hover:bg-zinc-200"
+                    aria-label="Remove"
+                    title="Remove"
                   >
-                    {videoId && (
-                      <img
-                        src={getVideoThumbnail(videoId)}
-                        alt="Video thumbnail"
-                        className="w-full h-20 object-cover rounded mb-2"
-                      />
-                    )}
-                    <p className="text-xs text-gray-600 truncate">{url}</p>
-                  </div>
-                );
-              })}
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              ))}
             </div>
           </div>
         )}
+
+        {/* Index button */}
+        <button
+          onClick={startIndexing}
+          disabled={isIndexing || pending.length === 0}
+          className="w-full inline-flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white text-sm py-2 rounded-md disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-red-300"
+        >
+          {isIndexing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+          {isIndexing ? 'Analyzing…' : 'Add to Chat'}
+        </button>
+
+        {error && (
+          <div className="mt-1 text-xs text-red-700 bg-red-50 border border-red-200 rounded-md px-2 py-1 flex items-center gap-1">
+            <AlertCircle className="w-3.5 h-3.5" />
+            {error}
+          </div>
+        )}
       </div>
-    </div>
+
+      {/* Video list */}
+      <div className="px-4 pb-4">
+        <div className="text-xs font-medium text-zinc-700 mb-2">
+          Your Videos ({videos.length})
+        </div>
+        <div className="space-y-3">
+          {videos.map((url) => {
+            const thumb = thumbnailFor(url);
+            return (
+              <div
+                key={url}
+                className="rounded-md border border-zinc-200 overflow-hidden bg-white hover:shadow-sm transition"
+              >
+                <div className="relative w-full aspect-video bg-zinc-100">
+                  {thumb ? (
+                    <img
+                      src={thumb}
+                      alt="Video thumbnail"
+                      loading="lazy"
+                      width={320}
+                      height={180}
+                      className="absolute inset-0 h-full w-full object-cover"
+                    />
+                  ) : (
+                    <div className="absolute inset-0 flex items-center justify-center text-zinc-400 text-xs">
+                      Playlist / Unknown
+                    </div>
+                  )}
+                </div>
+                <div className="px-2.5 py-2">
+                  <div className="text-[11px] text-zinc-600 truncate">{url}</div>
+                </div>
+              </div>
+            );
+          })}
+          {videos.length === 0 && (
+            <div className="text-xs text-zinc-500">
+              No videos yet. Paste a link above and press Enter.
+            </div>
+          )}
+        </div>
+      </div>
+    </aside>
   );
 }
-
-

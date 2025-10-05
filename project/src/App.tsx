@@ -19,11 +19,11 @@ function App() {
   };
 
   const handleVideosIndexed = (urls: string[]) => {
-    setIndexedVideos((prev) => [...prev, ...urls]);
+    setIndexedVideos((prev) => Array.from(new Set([...prev, ...(urls || [])])));
   };
 
   return (
-    <div className="app-bg min-h-screen flex">
+    <div className="app-bg h-screen flex">
       <Sidebar
         onVideosIndexed={handleVideosIndexed}
         indexedVideos={indexedVideos}
@@ -32,6 +32,7 @@ function App() {
       <ChatInterface
         key={refreshChat}
         hasIndexedVideos={indexedVideos.length > 0}
+        onVideosIndexed={handleVideosIndexed}  // <-- pass through
       />
     </div>
   );

@@ -17,6 +17,9 @@ from googleapiclient.discovery import build
 from utils import clean_transcript
 from tqdm.auto import tqdm
 from typing import Optional
+import re
+from urllib.parse import urlparse, parse_qs
+
 
 load_dotenv()
 
@@ -26,13 +29,53 @@ CHUNK_OVERLAP = 100
 
 
 def extract_video_id(url: str) -> str:
+    """
+    Robustly extract a YouTube video ID from common URL shapes:
+    - https://www.youtube.com/watch?v=VIDEO_ID
+    - https://youtu.be/VIDEO_ID
+    - https://www.youtube.com/live/VIDEO_ID
+    - https://www.youtube.com/shorts/VIDEO_ID
+    - https://www.youtube.com/embed/VIDEO_ID
+    - https://www.youtube-nocookie.com/embed/VIDEO_ID
+    - Handles extra params like ?si=... or &t=...
+    """
     parsed = urlparse(url)
-    if "youtube.com" in parsed.netloc:
-        query = parse_qs(parsed.query)
-        if "v" in query:
-            return query["v"][0]
-    if "youtu.be" in parsed.netloc:
-        return parsed.path.lstrip("/")
+    host = (parsed.netloc or "").lower()
+    path = parsed.path or ""
+    query = parse_qs(parsed.query or "")
+
+    # 1) Short links: youtu.be/<id>
+    if "youtu.be" in host:
+        vid = path.lstrip("/").split("/")[0]
+        if vid:
+            return vid
+
+    # 2) Standard YouTube domains
+    if "youtube.com" in host or "youtube-nocookie.com" in host:
+        # watch?v=<id>
+        v = query.get("v", [None])[0]
+        if v:
+            return v
+
+        # /embed/<id>, /shorts/<id>, /live/<id>, /v/<id>
+        m = re.match(r"^/(?:embed|shorts|live|v)/([A-Za-z0-9_-]{6,})", path)
+        if m:
+            return m.group(1)
+
+        # Rare legacy shapes: look for the segment after one of the markers
+        parts = [p for p in path.split("/") if p]
+        for i, p in enumerate(parts):
+            if p in ("v", "embed", "shorts", "live") and i + 1 < len(parts):
+                cand = parts[i + 1]
+                if len(cand) >= 6:
+                    return cand
+
+    # 3) Fallback: pick the first plausible 11-char YouTube ID anywhere in the URL
+    # (YouTube video IDs are typically 11 chars, but we accept >= 6 in the patterns above just in case.)
+    m = re.search(r"([A-Za-z0-9_-]{11})", url)
+    if m:
+        return m.group(1)
+
     raise ValueError(f"Invalid YouTube video URL: {url}")
 
 
